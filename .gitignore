@@ -1,0 +1,22 @@
+# Java / Maven
+cli/target/
+*.class
+*.log
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+**/.config/lockin/env
+plan.json
+supabase/.temp/
+supabase/.branches/
+
+# Logs
+logs/
