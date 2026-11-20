@@ -1,8 +1,8 @@
 # Lock In: implementation plan
 
 A personal tracker for a Lock In plan. Every evening I tell Claude what I did; Claude saves it to a
-database. Every Monday morning Claude grades the past week against the plan, and my iPhone reads the
-review out loud.
+database. Every Monday morning Claude grades the past week against my goals, and my iPhone shows me the
+summary.
 
 It is for one person only, and it is kept apart from the expense tracker (the family hub): its own
 repo, its own database schema and its own database logins.
@@ -15,12 +15,12 @@ Evening      me ──"today I did…"──▶ Claude (Remote Control session o
                                                             └─ lockin_writer ──▶ Supabase: lockin.*
 
 Monday 05:00 systemd timer ──▶ `claude -p` + skill `lockin-weekly-review`
-                                     ├─ `lockin week`        (plan, totals, entries, past reviews)
-                                     └─ `lockin review save` (scores, focus, spoken summary)
+                                     ├─ `lockin week`        (areas, totals, entries, past reviews)
+                                     └─ `lockin review save` (score, area scores, summary)
 
 Monday       iPhone Shortcut ──GET + x-lockin-key──▶ Edge Function `lockin-latest`
                                                        └─ lockin_reader ──▶ lockin.reviews
-             ◀── spoken_summary ── Speak Text
+             ◀── summary ── Show / Speak
 ```
 
 ## Decisions and why
@@ -66,7 +66,7 @@ lockin/
     weekly-review.sh
     systemd/lockin-review.service
     systemd/lockin-review.timer
-  plan.example.json
+  areas.example.json
   docs/plan.md                  this file
   .github/workflows/release.yml
 ```
@@ -102,30 +102,18 @@ Safe to run more than once.
 ```sql
 create schema if not exists lockin;
 
--- The plan, and the areas I work on. At most one plan is active.
-create table if not exists lockin.plans (
-  id             uuid primary key default gen_random_uuid(),
-  title          text not null,
-  starts_on      date not null,
-  ends_on        date,
-  is_active      boolean not null default true,
-  rubric_version integer not null default 1,
-  created_at     timestamptz not null default now(),
-  check (ends_on is null or ends_on >= starts_on)
-);
-create unique index if not exists plans_one_active on lockin.plans (is_active) where is_active;
-
+-- My goals: one row per thing I track, with its weekly target.
+-- An area I stop doing is set inactive, not deleted, so its past entries keep their area.
 create table if not exists lockin.areas (
   id            uuid primary key default gen_random_uuid(),
-  plan_id       uuid not null references lockin.plans (id) on delete cascade,
-  slug          text not null check (slug ~ '^[a-z][a-z0-9-]*$' and slug <> 'other'),
+  slug          text not null unique check (slug ~ '^[a-z][a-z0-9-]*$' and slug <> 'other'),
   name          text not null,
   unit          text not null check (unit in ('minutes', 'count', 'sessions', 'days')),
   weekly_target numeric not null check (weekly_target > 0),
-  weight        numeric not null default 1 check (weight > 0),
+  weight        numeric not null default 1 check (weight > 0),   -- counts more in the overall score
   rubric        text not null,          -- what 10/10 looks like, and what lowers the score
-  sort          integer not null default 0,
-  unique (plan_id, slug)
+  is_active     boolean not null default true,
+  created_at    timestamptz not null default now()
 );
 
 -- What I said, word for word. Several notes per day are allowed.
@@ -149,28 +137,23 @@ create table if not exists lockin.entries (
 create index if not exists entries_note_id_idx on lockin.entries (note_id);
 create index if not exists entries_area_id_idx on lockin.entries (area_id);
 
--- One review per plan and week. Saving again replaces it.
+-- One review per week. Saving again replaces it.
 create table if not exists lockin.reviews (
-  id             uuid primary key default gen_random_uuid(),
-  plan_id        uuid not null references lockin.plans (id),
-  week_start     date not null check (extract(isodow from week_start) = 1),   -- a Monday
-  overall_score  numeric(3, 1) not null check (overall_score between 0 and 10),
-  grade          text not null,
-  area_scores    jsonb not null check (jsonb_typeof(area_scores) = 'array'),
-                 -- [{ "slug", "actual", "target", "score", "comment" }]
-  summary        text not null,
-  focus          text not null,          -- where the time actually went
-  gaps           text not null,          -- furthest below target
-  next_week      text not null,          -- at most 3 concrete actions
-  spoken_summary text not null check (length(spoken_summary) <= 1200),
-  unlogged_days  date[] not null default '{}',
-  model          text not null,
-  rubric_version integer not null,
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now(),
-  unique (plan_id, week_start)
+  id          uuid primary key default gen_random_uuid(),
+  week_start  date not null unique check (extract(isodow from week_start) = 1),   -- a Monday
+  score       numeric(3, 1) not null check (score between 0 and 10),   -- weighted average of the areas
+  area_scores jsonb not null check (jsonb_typeof(area_scores) = 'array'),
+              -- [{ "slug", "actual", "target", "score", "comment" }]
+              -- keeps each area's target as it was that week, so changing a target later
+              -- doesn't change what past reviews meant
+  summary     text not null check (length(summary) between 1 and 1500),   -- what the iPhone gets
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
 );
 ```
+
+The letter grade (A ≥ 9, B ≥ 7.5, C ≥ 6, D ≥ 4, F below) is worked out from `score` when it's shown,
+not stored. Unlogged days are worked out from `daily_notes` by `lockin week`, not stored.
 
 How totals are counted, per area unit (done in SQL by `lockin week`, never by Claude):
 
@@ -204,6 +187,10 @@ grant usage on schema lockin to lockin_writer, lockin_reader;
 grant select, insert, update, delete on all tables in schema lockin to lockin_writer;
 grant select on lockin.reviews to lockin_reader;
 
+-- Tables added later by 003_… and on get the same grants without anyone remembering to.
+alter default privileges in schema lockin
+  grant select, insert, update, delete on tables to lockin_writer;
+
 alter role lockin_writer set search_path = lockin;
 alter role lockin_reader set search_path = lockin;
 ```
@@ -224,13 +211,14 @@ Rules:
 
 - Don't add `lockin` to **Settings → Data API → Exposed schemas**. The schema is reachable only through
   the two logins, so it needs no row-level security.
-- Any later change goes in a new file (`003_….sql`) that also grants on any new table explicitly.
+- Any later change goes in a new file (`003_….sql`). New tables get `lockin_writer`'s grants
+  automatically; `lockin_reader` still needs an explicit grant.
 
 ### Done when
 
 - [ ] Both files ran in the SQL Editor; passwords set.
 - [ ] Connected as `lockin_writer.<ref>` through the session pooler with `psql`:
-      `select * from lockin.plans` works, `select * from public.expenses` gives *permission denied*.
+      `select * from lockin.areas` works, `select * from public.expenses` gives *permission denied*.
 - [ ] As `lockin_reader`: `select` on `lockin.reviews` works; `insert` and `select` on
       `lockin.entries` are denied.
 
@@ -285,15 +273,15 @@ with a non-zero exit code.
 
 | Command | Does |
 | --- | --- |
-| `lockin plan show` | Active plan with areas, units, targets, weights, rubrics. |
-| `lockin plan apply --file plan.json` | Creates or updates the plan and its areas, matched by slug. Bumps `rubric_version` when any rubric, target or weight changed. |
+| `lockin areas show` | Active areas with units, targets, weights, rubrics. |
+| `lockin areas apply --file areas.json` | Creates or updates areas, matched by slug. Areas missing from the file are set inactive (never deleted). |
 | `lockin log --file -` | Reads `{ "day", "note", "entries": [{ "area", "description", "quantity"? }] }` and saves the note and entries in one transaction. Rejects unknown area slugs (the error lists the valid ones), `quantity` on `sessions`/`days` areas, future days, and days older than `max-backfill-days` unless `--force`. Prints what was saved, with ids. |
 | `lockin day [--day YYYY-MM-DD]` | Notes and entries of one day (default today). For confirming and correcting. |
 | `lockin entry delete --id` | Deletes one entry. |
 | `lockin note delete --id` | Deletes a note and its entries. |
-| `lockin week [--week-start YYYY-MM-DD]` | Everything the review needs in one call: plan and areas, **per-area actual vs target computed in SQL**, entries grouped by day, the unlogged days, the last 4 reviews. Default: the last completed Monday–Sunday week in `lockin.zone`. |
-| `lockin review save --file -` | Validates and saves a review: `week_start` is a Monday of a completed week, every area of the plan scored once, scores 0–10, `spoken_summary` ≤ 1,200 characters. Replaces an existing review of that week. |
-| `lockin review latest [--spoken]` | The latest review (JSON, or just the spoken text). |
+| `lockin week [--week-start YYYY-MM-DD]` | Everything the review needs in one call: active areas, **per-area actual vs target computed in SQL**, entries grouped by day, the unlogged days, the last 4 reviews. Default: the last completed Monday–Sunday week in `lockin.zone`. |
+| `lockin review save --file -` | Validates and saves a review: `week_start` is a Monday of a completed week, every active area scored once, scores 0–10, `summary` ≤ 1,500 characters. Replaces an existing review of that week. |
+| `lockin review latest [--summary]` | The latest review (JSON, or just the summary text), with the letter grade worked out from the score. |
 | `lockin reviews --last N` | The last N reviews, for trends. |
 
 Example `log` input:
@@ -318,9 +306,9 @@ Example `log` input:
 | Package | Contents |
 | --- | --- |
 | `config` | `LockinProperties` (`zone`, `maxBackfillDays`), `@RegisterReflectionForBinding` for every record read or written as JSON |
-| `model` | Records: `Plan`, `Area`, `Note`, `Entry`, `LogRequest`, `WeekReport`, `AreaTotal`, `Review`, `AreaScore` |
-| `db` | `PlanRepository`, `LogRepository`, `ReviewRepository`, all on `JdbcClient` |
-| `commands` | `PlanCommands`, `LogCommands`, `WeekCommands`, `ReviewCommands` |
+| `model` | Records: `Area`, `Note`, `Entry`, `LogRequest`, `WeekReport`, `AreaTotal`, `Review`, `AreaScore` |
+| `db` | `AreaRepository`, `LogRepository`, `ReviewRepository`, all on `JdbcClient` |
+| `commands` | `AreaCommands`, `LogCommands`, `WeekCommands`, `ReviewCommands` |
 | `output` | One JSON writer for stdout, one error writer for stderr and exit codes |
 
 ### Native-image rules
@@ -393,7 +381,7 @@ runs).
 
 - **Triggers:** "today I did…", "log my day", "lock in", listing what I did today.
 - **Steps:**
-  1. `lockin plan show` to get the valid areas and their units.
+  1. `lockin areas show` to get the valid areas and their units.
   2. Work out the day in my timezone. Before 04:00, assume the previous day and say so.
   3. Split the message into entries, each mapped to an area slug.
   4. `lockin log --file -` with the JSON.
@@ -412,19 +400,19 @@ runs).
 - **Steps:**
   1. `lockin week --week-start <last Monday>`.
   2. Score each area 0–10 from actual vs target, using that area's rubric.
-  3. Overall score = weighted average of the area scores (weights from the plan).
-  4. Grade from a fixed table: A ≥ 9, B ≥ 7.5, C ≥ 6, D ≥ 4, F below.
-  5. Write the review (see below).
-  6. `lockin review save --file -`. On a validation error, fix it and retry once.
-- **What the review says:**
-  - Focus: where the time actually went.
-  - Gaps: the areas furthest below target.
+  3. Overall score = weighted average of the area scores (weights from the areas).
+  4. Write the summary (see below).
+  5. `lockin review save --file -`. On a validation error, fix it and retry once.
+- **What the summary says**, in this order, in one text:
+  - The week's dates and the score with its letter grade ("Week of 16 to 22 November: 7.8, a B.").
+  - Where the time actually went.
+  - The areas furthest below target.
+  - The trend against the last 4 reviews.
+  - Unlogged days, if any; they are not counted as zeros, and the summary says they might be days
+    I did things but didn't log.
   - Next week: at most 3 concrete actions.
-  - Trend against the last 4 reviews.
-  - Unlogged days listed separately; they are not counted as zeros, and the review says they
-    might be days I did things but didn't log.
-- **`spoken_summary`:** under 150 words, starts with the week's dates ("Week of 16 to 22
-  November…"), plain sentences, no markdown or emoji, numbers easy to hear.
+- **Format:** under 200 words, plain sentences, no markdown or emoji, numbers easy to read and to
+  hear (it works shown on screen or read out loud).
 - **Tone:** honest. No inflated scores.
 
 ### Done when
@@ -510,7 +498,7 @@ Deno.serve(async (req) => {
     return new Response("Not found", { status: 404 });
   }
   const [row] = await sql`
-    select week_start, spoken_summary,
+    select week_start, summary,
            week_start = (date_trunc('week', (now() at time zone ${zone})::date) - interval '7 days')::date
              as is_last_week
     from lockin.reviews
@@ -519,8 +507,8 @@ Deno.serve(async (req) => {
   const text = !row
     ? "There is no Lock In review yet."
     : row.is_last_week
-      ? row.spoken_summary
-      : `No review for last week yet. The latest one is from the week of ${row.week_start}. ${row.spoken_summary}`;
+      ? row.summary
+      : `No review for last week yet. The latest one is from the week of ${row.week_start}. ${row.summary}`;
   return new Response(text, {
     headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
   });
@@ -549,13 +537,13 @@ touch the project's migration history. Rotating the key: set a new secret, edit 
 ### Done when
 
 - [ ] `curl` without the header → 404.
-- [ ] `curl -H "x-lockin-key: …"` → the latest spoken summary.
+- [ ] `curl -H "x-lockin-key: …"` → the latest summary.
 
 ## Step 8: iPhone Shortcut
 
 1. **Get Contents of URL**: `https://<ref>.supabase.co/functions/v1/lockin-latest`, method GET,
    header `x-lockin-key: <key>`.
-2. **Speak Text** with the result.
+2. **Show Notification** (or **Speak Text**) with the result.
 
 Trigger: a personal automation, for example **When my alarm is stopped**, on Mondays. Works over
 mobile data; no Tailscale or SSH needed.
@@ -565,10 +553,10 @@ weekly summary, nothing more, and the key can be rotated in a minute.
 
 ## Step 9: first week
 
-- [ ] Write `plan.json` (start from `plan.example.json`) with areas, units, targets, weights and
-      rubrics; `lockin plan apply --file plan.json`.
+- [ ] Write `areas.json` (start from `areas.example.json`) with areas, units, targets, weights and
+      rubrics; `lockin areas apply --file areas.json`.
 - [ ] Log a few real days.
-- [ ] Run the weekly review by hand in the Remote Control session; tune the rubrics and the spoken
+- [ ] Run the weekly review by hand in the Remote Control session; tune the rubrics and the
       summary until they read right.
 - [ ] Enable the timer (step 6).
 - [ ] Backups: fill in the table in the expense tracker's `docs/backups.md`. If the project is on the
