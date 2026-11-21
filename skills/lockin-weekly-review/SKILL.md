@@ -1,6 +1,6 @@
 ---
 name: lockin-weekly-review
-description: Grades my last Lock In week against my goals and saves the review, through the lockin CLI. Runs unattended every Monday at 05:00 ("Run the lockin-weekly-review skill for the week that ended yesterday"); also use it when I ask to review, grade or score a Lock In week by hand. Never asks questions.
+description: Grades my last Lock In week against my goals and saves the review, through the lockin CLI. Runs unattended every Monday at 05:00 ("/lockin-weekly-review Grade the last completed week."); also use it when I ask to review, grade or score a Lock In week by hand. Never asks questions.
 ---
 
 # Lock In: weekly review
