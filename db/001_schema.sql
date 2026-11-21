@@ -5,6 +5,7 @@ create schema if not exists lockin;
 
 -- My goals: one row per thing I track, with its weekly target.
 -- An area I stop doing is set inactive, not deleted, so its past entries keep their area.
+-- Setting it inactive also pauses it: it is not scored until it is made active again.
 create table if not exists lockin.areas (
   id            uuid primary key default gen_random_uuid(),
   slug          text not null unique check (slug ~ '^[a-z][a-z0-9-]*$' and slug <> 'other'),
@@ -14,8 +15,11 @@ create table if not exists lockin.areas (
   weight        numeric not null default 1 check (weight > 0),   -- counts more in the overall score
   rubric        text not null,          -- what 10/10 looks like, and what lowers the score
   is_active     boolean not null default true,
+  deactivated_at timestamptz,           -- when it was set inactive; null while active
   created_at    timestamptz not null default now()
 );
+-- For a database created before deactivated_at existed.
+alter table lockin.areas add column if not exists deactivated_at timestamptz;
 
 -- What I said, word for word. Several notes per day are allowed.
 create table if not exists lockin.daily_notes (

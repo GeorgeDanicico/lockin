@@ -4,10 +4,13 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import io.github.georgedanicico.lockin.TestDatabase;
 import io.github.georgedanicico.lockin.areas.entity.Area;
+import io.github.georgedanicico.lockin.areas.entity.InactiveArea;
 import io.github.georgedanicico.lockin.areas.entity.Unit;
+import io.github.georgedanicico.lockin.cli.control.LockinProperties;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JacksonException;
@@ -45,6 +48,12 @@ class AreasTests {
 	@Autowired
 	AreasShow show;
 
+	@Autowired
+	AreasActivate activate;
+
+	@Autowired
+	LockinProperties properties;
+
 	@AfterEach
 	void restoreStdin() {
 		System.setIn(STDIN);
@@ -54,7 +63,7 @@ class AreasTests {
 	void saveCreatesSeveralAreasAtOnce() {
 		save("[" + READING + "," + SPANISH + "]");
 
-		var areas = show.run(args());
+		var areas = active();
 		assertThat(areas).extracting(Area::slug).containsExactly("reading", "spanish");
 		assertThat(areas.get(0).unit()).isEqualTo(Unit.MINUTES);
 		assertThat(areas.get(0).weight()).as("default weight").isEqualByComparingTo(BigDecimal.ONE);
@@ -67,7 +76,7 @@ class AreasTests {
 
 		save("[" + READING.replace("150", "200") + "]");
 
-		var areas = show.run(args());
+		var areas = active();
 		assertThat(areas).extracting(Area::slug).containsExactly("reading", "spanish");
 		assertThat(areas.get(0).weeklyTarget()).isEqualByComparingTo("200");
 	}
@@ -77,10 +86,10 @@ class AreasTests {
 		save("[" + READING + "," + SPANISH + "]");
 
 		assertThat(remove.run(args("spanish"))).containsExactly("spanish");
-		assertThat(show.run(args())).extracting(Area::slug).containsExactly("reading");
+		assertThat(active()).extracting(Area::slug).containsExactly("reading");
 
 		save("[" + SPANISH + "]");
-		assertThat(show.run(args())).extracting(Area::slug).containsExactly("reading", "spanish");
+		assertThat(active()).extracting(Area::slug).containsExactly("reading", "spanish");
 	}
 
 	@Test
@@ -90,7 +99,59 @@ class AreasTests {
 		assertThatThrownBy(() -> remove.run(args("spanish", "gym")))
 			.hasMessage("not active areas: [gym]; active areas: [reading, spanish]");
 		assertThatThrownBy(() -> remove.run(args())).hasMessage("at least one slug is required");
-		assertThat(show.run(args())).extracting(Area::slug).containsExactly("reading", "spanish");
+		assertThat(active()).extracting(Area::slug).containsExactly("reading", "spanish");
+	}
+
+	@Test
+	void showInactiveListsRemovedAreasWithTheDayTheyWereDeactivated() {
+		save("[" + READING + "," + SPANISH + "]");
+		assertThat(inactive()).isEmpty();
+
+		remove.run(args("spanish"));
+
+		var inactive = inactive();
+		assertThat(inactive).hasSize(1);
+		var spanish = inactive.getFirst();
+		assertThat(spanish.slug()).isEqualTo("spanish");
+		assertThat(spanish.rubric()).isEqualTo("A lesson every day");
+		assertThat(spanish.weight()).isEqualByComparingTo("2");
+		assertThat(spanish.deactivatedOn()).isEqualTo(properties.today());
+	}
+
+	@Test
+	void activateBringsAreasBackUnchanged() {
+		save("[" + READING + "," + SPANISH + "]");
+		remove.run(args("reading", "spanish"));
+
+		var activated = activate.run(args("spanish"));
+
+		assertThat(activated).extracting(Area::slug).containsExactly("spanish");
+		assertThat(activated.getFirst().weeklyTarget()).isEqualByComparingTo("7");
+		assertThat(activated.getFirst().rubric()).isEqualTo("A lesson every day");
+		assertThat(active()).extracting(Area::slug).containsExactly("spanish");
+		assertThat(inactive()).extracting(InactiveArea::slug)
+			.containsExactly("reading");
+	}
+
+	@Test
+	void saveOfAnInactiveAreaClearsItsDeactivatedDay() {
+		save("[" + READING + "]");
+		remove.run(args("reading"));
+
+		save("[" + READING + "]");
+
+		assertThat(inactive()).isEmpty();
+	}
+
+	@Test
+	void activateChangesNothingWhenASlugIsNotInactive() {
+		save("[" + READING + "," + SPANISH + "]");
+		remove.run(args("spanish"));
+
+		assertThatThrownBy(() -> activate.run(args("spanish", "reading", "gym")))
+			.hasMessage("not inactive areas: [reading, gym]; inactive areas: [spanish]");
+		assertThatThrownBy(() -> activate.run(args())).hasMessage("at least one slug is required");
+		assertThat(active()).extracting(Area::slug).containsExactly("reading");
 	}
 
 	@Test
@@ -107,6 +168,16 @@ class AreasTests {
 			.as("a typo in an optional field is an error, not a silent default")
 			.isInstanceOf(JacksonException.class)
 			.hasMessageContaining("wieght");
+	}
+
+	@SuppressWarnings("unchecked")
+	private List<Area> active() {
+		return (List<Area>) show.run(args());
+	}
+
+	@SuppressWarnings("unchecked")
+	private List<InactiveArea> inactive() {
+		return (List<InactiveArea>) show.run(args("--inactive"));
 	}
 
 	private void save(String json) {

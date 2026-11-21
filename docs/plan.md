@@ -103,6 +103,7 @@ create schema if not exists lockin;
 
 -- My goals: one row per thing I track, with its weekly target.
 -- An area I stop doing is set inactive, not deleted, so its past entries keep their area.
+-- Setting it inactive also pauses it: it is not scored until it is made active again.
 create table if not exists lockin.areas (
   id            uuid primary key default gen_random_uuid(),
   slug          text not null unique check (slug ~ '^[a-z][a-z0-9-]*$' and slug <> 'other'),
@@ -112,8 +113,11 @@ create table if not exists lockin.areas (
   weight        numeric not null default 1 check (weight > 0),   -- counts more in the overall score
   rubric        text not null,          -- what 10/10 looks like, and what lowers the score
   is_active     boolean not null default true,
+  deactivated_at timestamptz,           -- when it was set inactive; null while active
   created_at    timestamptz not null default now()
 );
+-- For a database created before deactivated_at existed.
+alter table lockin.areas add column if not exists deactivated_at timestamptz;
 
 -- What I said, word for word. Several notes per day are allowed.
 create table if not exists lockin.daily_notes (
@@ -272,9 +276,10 @@ with a non-zero exit code.
 
 | Command | Does |
 | --- | --- |
-| `lockin areas show` | Active areas with units, targets, weights, rubrics, sorted by slug. **Done.** |
-| `lockin areas save` | Reads an array of one or more `{ "slug", "name", "unit", "weekly_target", "weight"?, "rubric" }` from stdin (weight defaults to 1). In one transaction, creates each area or updates the one with the same slug, making it active again; other areas aren't touched. Rejects an empty list, a repeated slug, a bad slug, an unknown unit, a target or weight ≤ 0, a blank name or rubric, and unknown fields. Prints the saved areas. **Done.** |
-| `lockin areas remove <slug>...` | Sets one or more areas inactive (never deleted, so their entries keep their area). Every slug must be an active area, or nothing changes. Prints the removed slugs. **Done.** |
+| `lockin areas show [--inactive]` | Active areas with units, targets, weights, rubrics, sorted by slug. With `--inactive`, the inactive ones instead, most recently deactivated first, each with `deactivated_on` (my local day; null for areas deactivated before the date was kept). **Done.** |
+| `lockin areas save` | Reads an array of one or more `{ "slug", "name", "unit", "weekly_target", "weight"?, "rubric" }` from stdin (weight defaults to 1). In one transaction, creates each area or updates the one with the same slug, making it active again (and clearing its `deactivated_at`); other areas aren't touched. Rejects an empty list, a repeated slug, a bad slug, an unknown unit, a target or weight ≤ 0, a blank name or rubric, and unknown fields. Prints the saved areas. **Done.** |
+| `lockin areas remove <slug>...` | Sets one or more areas inactive and records `deactivated_at` (never deleted, so their entries keep their area). Every slug must be an active area, or nothing changes. Prints the removed slugs. **Done.** |
+| `lockin areas activate <slug>...` | Makes one or more inactive areas active again with their target, weight and rubric unchanged, and clears `deactivated_at`. Every slug must be an inactive area, or nothing changes. Prints the activated areas. **Done.** |
 | `lockin log [--force]` | Reads from stdin `{ "day", "note", "entries"?: [{ "area"?, "description", "quantity"? }] }` and saves the note and entries in one transaction. `area` omitted, null or `"other"` = no area. Rejects an area that isn't active (the error lists the active ones), a `quantity` on `sessions`/`days` areas or on "other", a quantity ≤ 0, a blank description, a note over 4,000 characters, future days, and days older than `max-backfill-days` unless `--force`. Prints the saved note: `{ "id", "day", "text", "entries": [{ "id", "area", "description", "quantity" }] }`. **Done.** |
 | `lockin day [--day=YYYY-MM-DD]` | The day's notes (default today), oldest first, in the same shape. For confirming and correcting. **Done.** |
 | `lockin entry delete --id=<uuid>` | Deletes one entry; prints it. **Done.** |
@@ -311,7 +316,7 @@ the result to print), `control` (logic and SQL, only when there is some: a one-q
 | --- | --- | --- | --- |
 | `cli` | `Command`, `CommandLine` (dispatch, JSON on stdout, errors on stderr, exit codes), `Input` (reads JSON from stdin) | | |
 | `ping` | `Ping` | | |
-| `areas` | `AreasShow`, `AreasSave`, `AreasRemove` | `AreaRepository` (`JdbcClient`) | `Area` (checks its own rules), `Unit` |
+| `areas` | `AreasShow`, `AreasSave`, `AreasRemove`, `AreasActivate` | `AreaRepository` (`JdbcClient`) | `Area` (checks its own rules), `InactiveArea`, `Unit` |
 | `log` | `Log`, `Day`, `EntryDelete`, `NoteDelete` | `LogRepository` (log rules, SQL) | `LogRequest`, `Note`, `Entry` |
 | `review` | `Week`, `ReviewSave`, `Reviews` | `WeekRepository` (weekly totals in SQL), `ReviewRepository` (review rules, SQL) | `WeekReport`, `AreaTotal`, `LoggedDay`, `LoggedEntry`, `Review`, `AreaScore` |
 
@@ -409,6 +414,18 @@ runs).
      to confirm: they decide how my weeks are graded.
   3. `lockin areas save` with an array of the confirmed areas (one or several), or
      `lockin areas remove <slug>...`.
+- **Goals that aren't weekly** ("call my parents every two weeks"): a fractional `weekly_target`
+  (0.5 for every two weeks) and a rubric that also looks at last week, since the review gets the
+  last reviews' actuals: "10 if at least 1 session this week or last week (last week's actual is in
+  the recent reviews). 0 if neither." Without that rubric the score swings 10, 0, 10, 0.
+- **Pausing a goal** ("no gym while I'm on vacation", "bring Spanish back"): there is no separate
+  pause. `lockin areas remove <slug>` stops it being scored; `lockin areas show --inactive`, then
+  `lockin areas activate <slug>` brings it back unchanged. The review only sees whether an area is
+  active when it runs (Monday 05:00), so: deactivate before the week I'll skip, and activate again
+  after that week's Monday review. Say this when I ask to pause or resume.
+- **Cleanup:** when I ask what's inactive, or when listing goals, mention areas inactive for more
+  than a month (`deactivated_on`) and ask whether they are still goals. Never delete an area; if one
+  is no longer a goal it simply stays inactive.
 
 ### `lockin-weekly-review` (unattended)
 

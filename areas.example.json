@@ -20,5 +20,12 @@
     "weekly_target": 3,
     "weight": 2,
     "rubric": "10: at least 3 times of real attention together, phones away. 7 for 2, 4 for 1, 0 for none."
+  },
+  {
+    "slug": "parents",
+    "name": "Call my parents",
+    "unit": "sessions",
+    "weekly_target": 0.5,
+    "rubric": "Every two weeks. 10 if at least 1 call this week or last week (last week's actual is in the recent reviews). 0 if neither."
   }
 ]

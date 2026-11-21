@@ -4,15 +4,19 @@ import java.util.List;
 
 import io.github.georgedanicico.lockin.areas.control.AreaRepository;
 import io.github.georgedanicico.lockin.areas.entity.Area;
+import io.github.georgedanicico.lockin.areas.entity.InactiveArea;
 import io.github.georgedanicico.lockin.cli.boundary.Command;
 
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.stereotype.Component;
 
-/** {@code lockin areas show}: the active areas. */
+/**
+ * {@code lockin areas show [--inactive]}: the active areas, or with {@code --inactive} the inactive
+ * ones, each with the day it was deactivated.
+ */
 @Component
-@RegisterReflectionForBinding(Area.class)
+@RegisterReflectionForBinding({ Area.class, InactiveArea.class })
 class AreasShow implements Command {
 
 	private final AreaRepository areas;
@@ -27,8 +31,8 @@ class AreasShow implements Command {
 	}
 
 	@Override
-	public List<Area> run(ApplicationArguments args) {
-		return areas.active();
+	public List<?> run(ApplicationArguments args) {
+		return args.containsOption("inactive") ? areas.inactive() : areas.active();
 	}
 
 }
