@@ -1,0 +1,36 @@
+# Runs every test on the JVM and again as a native image, to catch missing native hints before a release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: 'maven'
+
+      # The JVM tests run first, then the same tests as a native image. Testcontainers uses the
+      # runner's Docker.
+      - name: Test on the JVM and natively
+        run: ./mvnw --batch-mode --no-transfer-progress -PnativeTest test
