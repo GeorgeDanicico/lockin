@@ -1,0 +1,84 @@
+# Builds the native binary for each main commit that passed CI and attaches it to the "builds"
+# release as lockin-linux-x86_64-<commit>, then wakes vps-apps, which installs it with ops/install.sh.
+name: Build
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  native:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch'
+      || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    # Ubuntu 24.04 has glibc 2.39, not newer than the VPS's Debian 13 (2.41).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.COMMIT }}
+
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: 'maven'
+
+      # The tests already ran in CI, on the JVM and natively.
+      - name: Build the native image
+        working-directory: cli
+        run: ./mvnw --batch-mode --no-transfer-progress -Pnative -DskipTests native:compile
+
+      - name: Smoke test
+        run: bash ops/smoke-test.sh cli/target/lockin
+
+      - name: Attach to the builds release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="lockin-linux-$(uname -m)-$COMMIT"
+          cp cli/target/lockin "$asset"
+          sha256sum "$asset" > "$asset.sha256"
+          if ! gh release view builds >/dev/null 2>&1; then
+            gh release create builds --prerelease --title Builds --target "$COMMIT" \
+              --notes "Native binaries, one per main commit, installed on the VPS by ops/install.sh."
+          fi
+          gh release upload builds "$asset" "$asset.sha256" --clobber
+          # Keep the 10 newest builds.
+          gh release view builds --json assets \
+            --jq '[.assets[] | select(.name | endswith(".sha256") | not)] | sort_by(.createdAt) | reverse | .[10:][] | .name' |
+          while read -r old; do
+            gh release delete-asset builds "$old" --yes
+            gh release delete-asset builds "$old.sha256" --yes || true
+          done
+
+  notify:
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the central deployment workflow
+        env:
+          GH_TOKEN: ${{ secrets.VPS_DISPATCH_TOKEN }}
+        run: |
+          # vps-apps has no schedule: without this call the VPS never installs the new binary.
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::VPS_DISPATCH_TOKEN is not set, so vps-apps was not told about this build. Add the secret, then re-run this job."
+            exit 1
+          fi
+          gh api --method POST repos/GeorgeDanicico/vps-apps/dispatches \
+            -f event_type=upstream-changed

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Installed as <prefix>/bin/lockin by ops/install.sh. Loads the database login from a file only its
+# owner can read, so the password is never in Claude's environment or on a command line.
+set -euo pipefail
+set -a
+# shellcheck disable=SC1090
+. "${LOCKIN_ENV_FILE:-$HOME/.config/lockin/env}"
+set +a
+exec "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/../lib/lockin/lockin-bin" "$@"
