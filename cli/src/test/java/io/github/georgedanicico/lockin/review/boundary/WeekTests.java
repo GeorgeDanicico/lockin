@@ -17,7 +17,6 @@ import io.github.georgedanicico.lockin.review.entity.AreaTotal;
 import io.github.georgedanicico.lockin.review.entity.LoggedDay;
 import io.github.georgedanicico.lockin.review.entity.LoggedEntry;
 import io.github.georgedanicico.lockin.review.entity.Review;
-import io.github.georgedanicico.lockin.review.entity.WeekReport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +26,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 
+import static io.github.georgedanicico.lockin.TestArguments.args;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
@@ -60,24 +60,24 @@ class WeekTests {
 
 	@Test
 	void countsEachAreaInItsUnit() {
-		UUID first = note(monday, "Read 10 minutes, 30 pushups, gym, Duolingo, a game of chess");
+		var first = note(monday, "Read 10 minutes, 30 pushups, gym, Duolingo, a game of chess");
 		entry(first, "reading", "Read a book", 10);
 		entry(first, "pushups", "Pushups", 30);
 		entry(first, "gym", "Gym", null);
 		entry(first, "spanish", "Duolingo lesson", null);
 		entry(first, "chess", "A game of chess", null);
-		UUID second = note(monday, "Read 20 more minutes, a Spanish podcast, cooked dinner");
+		var second = note(monday, "Read 20 more minutes, a Spanish podcast, cooked dinner");
 		entry(second, "reading", "Read a book", 20);
 		entry(second, "spanish", "Spanish podcast", null);
 		entry(second, null, "Cooked dinner", null);
-		UUID wednesday = note(monday.plusDays(2), "Gym, 20 pushups, Duolingo");
+		var wednesday = note(monday.plusDays(2), "Gym, 20 pushups, Duolingo");
 		entry(wednesday, "gym", "Gym", null);
 		entry(wednesday, "pushups", "Pushups", 20);
 		entry(wednesday, "spanish", "Duolingo lesson", null);
 		entry(note(monday.minusDays(1), "Read 100 minutes"), "reading", "Read a book", 100);
 		entry(note(monday.plusDays(7), "Read 100 minutes"), "reading", "Read a book", 100);
 
-		WeekReport report = week.run(List.of("--week-start", monday.toString()));
+		var report = week.run(args("--week-start=" + monday));
 
 		assertThat(report.weekStart()).isEqualTo(monday);
 		assertThat(report.weekEnd()).isEqualTo(monday.plusDays(6));
@@ -86,7 +86,7 @@ class WeekTests {
 			.containsExactly(tuple("gym", 2), tuple("pushups", 50), tuple("reading", 30),
 					tuple("spanish", 2), tuple("writing", 0));
 		assertThat(report.days()).extracting(LoggedDay::day).containsExactly(monday, monday.plusDays(2));
-		LoggedDay day = report.days().get(0);
+		var day = report.days().get(0);
 		assertThat(day.notes()).containsExactly("Read 10 minutes, 30 pushups, gym, Duolingo, a game of chess",
 				"Read 20 more minutes, a Spanish podcast, cooked dinner");
 		assertThat(day.entries()).extracting(LoggedEntry::area, LoggedEntry::description)
@@ -101,7 +101,7 @@ class WeekTests {
 
 	@Test
 	void defaultsToTheLastCompletedWeek() {
-		WeekReport report = week.run(List.of());
+		var report = week.run(args());
 
 		assertThat(report.weekStart().getDayOfWeek()).isEqualTo(DayOfWeek.MONDAY);
 		assertThat(report.weekEnd()).isBefore(properties.today()).isAfterOrEqualTo(properties.today().minusDays(7));
@@ -112,15 +112,15 @@ class WeekTests {
 
 	@Test
 	void includesTheLast4ReviewsBeforeTheWeek() {
-		for (int weeks = -5; weeks <= 1; weeks++) {
+		for (var weeks = -5; weeks <= 1; weeks++) {
 			review(monday.plusWeeks(weeks), "9.5");
 		}
 
-		WeekReport report = week.run(List.of("--week-start", monday.toString()));
+		var report = week.run(args("--week-start=" + monday));
 
 		assertThat(report.recentReviews()).extracting(Review::weekStart)
 			.containsExactly(monday.minusWeeks(1), monday.minusWeeks(2), monday.minusWeeks(3), monday.minusWeeks(4));
-		Review latest = report.recentReviews().get(0);
+		var latest = report.recentReviews().get(0);
 		assertThat(latest.grade()).isEqualTo("A");
 		assertThat(latest.areaScores()).extracting(AreaScore::slug, AreaScore::comment)
 			.containsExactly(tuple("gym", "Two sessions"));
@@ -128,11 +128,13 @@ class WeekTests {
 
 	@Test
 	void rejectsAWeekStartThatIsNotAMonday() {
-		assertThatThrownBy(() -> week.run(List.of("--week-start", monday.plusDays(1).toString())))
+		assertThatThrownBy(() -> week.run(args("--week-start=" + monday.plusDays(1))))
 			.hasMessage("--week-start must be a Monday: " + monday.plusDays(1));
-		assertThatThrownBy(() -> week.run(List.of("--week-start", "last-monday")))
+		assertThatThrownBy(() -> week.run(args("--week-start=last-monday")))
 			.hasMessage("--week-start must be a date, YYYY-MM-DD: last-monday");
-		assertThatThrownBy(() -> week.run(List.of("--week-start"))).hasMessage("--week-start needs a value");
+		assertThatThrownBy(() -> week.run(args("--week-start", monday.toString())))
+			.as("the value goes after =")
+			.hasMessage("--week-start needs a value: --week-start=…");
 	}
 
 	private static Area area(String slug, Unit unit) {

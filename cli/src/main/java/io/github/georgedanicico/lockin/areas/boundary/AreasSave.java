@@ -8,6 +8,7 @@ import io.github.georgedanicico.lockin.cli.boundary.Command;
 import io.github.georgedanicico.lockin.cli.boundary.Input;
 
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
+import org.springframework.boot.ApplicationArguments;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 
@@ -34,8 +35,8 @@ class AreasSave implements Command {
 	}
 
 	@Override
-	public List<Area> run(List<String> args) {
-		List<Area> saved = input.read(new TypeReference<List<Area>>() {
+	public List<Area> run(ApplicationArguments args) {
+		var saved = input.read(new TypeReference<List<Area>>() {
 		});
 		areas.save(saved);
 		return saved;

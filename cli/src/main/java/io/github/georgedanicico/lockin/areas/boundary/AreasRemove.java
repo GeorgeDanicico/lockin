@@ -5,6 +5,7 @@ import java.util.List;
 import io.github.georgedanicico.lockin.areas.control.AreaRepository;
 import io.github.georgedanicico.lockin.cli.boundary.Command;
 
+import org.springframework.boot.ApplicationArguments;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,7 +27,8 @@ class AreasRemove implements Command {
 	}
 
 	@Override
-	public List<String> run(List<String> slugs) {
+	public List<String> run(ApplicationArguments args) {
+		var slugs = args.getNonOptionArgs();
 		areas.remove(slugs);
 		return slugs;
 	}

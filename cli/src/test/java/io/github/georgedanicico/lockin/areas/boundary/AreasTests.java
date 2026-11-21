@@ -4,7 +4,6 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 
 import io.github.georgedanicico.lockin.TestDatabase;
 import io.github.georgedanicico.lockin.areas.entity.Area;
@@ -18,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.transaction.annotation.Transactional;
 
+import static io.github.georgedanicico.lockin.TestArguments.args;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -54,7 +54,7 @@ class AreasTests {
 	void saveCreatesSeveralAreasAtOnce() {
 		save("[" + READING + "," + SPANISH + "]");
 
-		List<Area> areas = show.run(List.of());
+		var areas = show.run(args());
 		assertThat(areas).extracting(Area::slug).containsExactly("reading", "spanish");
 		assertThat(areas.get(0).unit()).isEqualTo(Unit.MINUTES);
 		assertThat(areas.get(0).weight()).as("default weight").isEqualByComparingTo(BigDecimal.ONE);
@@ -67,7 +67,7 @@ class AreasTests {
 
 		save("[" + READING.replace("150", "200") + "]");
 
-		List<Area> areas = show.run(List.of());
+		var areas = show.run(args());
 		assertThat(areas).extracting(Area::slug).containsExactly("reading", "spanish");
 		assertThat(areas.get(0).weeklyTarget()).isEqualByComparingTo("200");
 	}
@@ -76,21 +76,21 @@ class AreasTests {
 	void removeSetsAreasInactiveAndSaveBringsThemBack() {
 		save("[" + READING + "," + SPANISH + "]");
 
-		assertThat(remove.run(List.of("spanish"))).containsExactly("spanish");
-		assertThat(show.run(List.of())).extracting(Area::slug).containsExactly("reading");
+		assertThat(remove.run(args("spanish"))).containsExactly("spanish");
+		assertThat(show.run(args())).extracting(Area::slug).containsExactly("reading");
 
 		save("[" + SPANISH + "]");
-		assertThat(show.run(List.of())).extracting(Area::slug).containsExactly("reading", "spanish");
+		assertThat(show.run(args())).extracting(Area::slug).containsExactly("reading", "spanish");
 	}
 
 	@Test
 	void removeChangesNothingWhenASlugIsNotActive() {
 		save("[" + READING + "," + SPANISH + "]");
 
-		assertThatThrownBy(() -> remove.run(List.of("spanish", "gym")))
+		assertThatThrownBy(() -> remove.run(args("spanish", "gym")))
 			.hasMessage("not active areas: [gym]; active areas: [reading, spanish]");
-		assertThatThrownBy(() -> remove.run(List.of())).hasMessage("at least one slug is required");
-		assertThat(show.run(List.of())).extracting(Area::slug).containsExactly("reading", "spanish");
+		assertThatThrownBy(() -> remove.run(args())).hasMessage("at least one slug is required");
+		assertThat(show.run(args())).extracting(Area::slug).containsExactly("reading", "spanish");
 	}
 
 	@Test
@@ -111,7 +111,7 @@ class AreasTests {
 
 	private void save(String json) {
 		System.setIn(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
-		save.run(List.of());
+		save.run(args());
 	}
 
 }

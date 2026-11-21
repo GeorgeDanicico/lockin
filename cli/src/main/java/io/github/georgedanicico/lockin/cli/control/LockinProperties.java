@@ -6,7 +6,7 @@ import java.time.ZoneId;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * @param zone my timezone ({@code LOCKIN_TZ}); "today" and "last week" are in this zone
+ * @param zone my timezone ({@code LOCKIN_TZ}, default {@code Europe/Bucharest}); "today" and "last week" are in this zone
  * @param maxBackfillDays how many days back a day may be logged without {@code --force}
  */
 @ConfigurationProperties("lockin")

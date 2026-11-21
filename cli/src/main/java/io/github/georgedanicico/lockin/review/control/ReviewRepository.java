@@ -8,7 +8,6 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 import io.github.georgedanicico.lockin.areas.control.AreaRepository;
@@ -54,25 +53,25 @@ public class ReviewRepository {
 	 */
 	@Transactional
 	public Review save(Review review) {
-		LocalDate sunday = review.weekStart().plusDays(6);
+		var sunday = review.weekStart().plusDays(6);
 		require(sunday.isBefore(properties.today()),
 				"the week of " + review.weekStart() + " is not over yet: it ends on " + sunday);
-		List<Area> active = areas.active();
+		var active = areas.active();
 		require(!active.isEmpty(), "there are no active areas to review");
-		Map<String, BigDecimal> weights = active.stream().collect(Collectors.toMap(Area::slug, Area::weight));
-		List<String> slugs = review.areaScores().stream().map(AreaScore::slug).toList();
+		var weights = active.stream().collect(Collectors.toMap(Area::slug, Area::weight));
+		var slugs = review.areaScores().stream().map(AreaScore::slug).toList();
 		require(new HashSet<>(slugs).size() == slugs.size(), "each area may be scored only once: " + slugs);
-		List<String> unknown = slugs.stream().filter(slug -> !weights.containsKey(slug)).toList();
+		var unknown = slugs.stream().filter(slug -> !weights.containsKey(slug)).toList();
 		require(unknown.isEmpty(), "not active areas: " + unknown + "; active areas: " + active.stream().map(Area::slug).toList());
-		List<String> missing = active.stream().map(Area::slug).filter(slug -> !slugs.contains(slug)).toList();
+		var missing = active.stream().map(Area::slug).filter(slug -> !slugs.contains(slug)).toList();
 		require(missing.isEmpty(), "every active area must be scored; missing: " + missing);
-		BigDecimal weighted = BigDecimal.ZERO;
-		BigDecimal total = BigDecimal.ZERO;
-		for (AreaScore area : review.areaScores()) {
+		var weighted = BigDecimal.ZERO;
+		var total = BigDecimal.ZERO;
+		for (var area : review.areaScores()) {
 			weighted = weighted.add(weights.get(area.slug()).multiply(area.score()));
 			total = total.add(weights.get(area.slug()));
 		}
-		BigDecimal average = weighted.divide(total, MathContext.DECIMAL64);
+		var average = weighted.divide(total, MathContext.DECIMAL64);
 		require(review.score().subtract(average).abs().compareTo(TOLERANCE) <= 0,
 				"score " + review.score() + " must be within 0.1 of the weighted average of the area scores, "
 						+ average.setScale(2, RoundingMode.HALF_UP));

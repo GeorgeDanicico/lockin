@@ -1,7 +1,5 @@
 package io.github.georgedanicico.lockin.review.boundary;
 
-import java.util.List;
-
 import io.github.georgedanicico.lockin.cli.boundary.Command;
 import io.github.georgedanicico.lockin.cli.boundary.Input;
 import io.github.georgedanicico.lockin.review.control.ReviewRepository;
@@ -9,6 +7,7 @@ import io.github.georgedanicico.lockin.review.entity.AreaScore;
 import io.github.georgedanicico.lockin.review.entity.Review;
 
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
+import org.springframework.boot.ApplicationArguments;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 
@@ -35,7 +34,7 @@ class ReviewSave implements Command {
 	}
 
 	@Override
-	public Review run(List<String> args) {
+	public Review run(ApplicationArguments args) {
 		return reviews.save(input.read(new TypeReference<Review>() {
 		}));
 	}

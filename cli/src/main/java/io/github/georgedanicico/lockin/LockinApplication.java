@@ -9,7 +9,10 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 public class LockinApplication {
 
 	public static void main(String[] args) {
-		System.exit(SpringApplication.exit(SpringApplication.run(LockinApplication.class, args)));
+		var application = new SpringApplication(LockinApplication.class);
+		// A command's --name=value options are its own, not Spring properties: --id=… must not configure the app.
+		application.setAddCommandLineProperties(false);
+		System.exit(SpringApplication.exit(application.run(args)));
 	}
 
 }

@@ -27,6 +27,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 
+import static io.github.georgedanicico.lockin.TestArguments.args;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
@@ -75,7 +76,7 @@ class ReviewTests {
 
 	@Test
 	void saveSavesTheReviewAndReviewsShowsIt() {
-		Review saved = save(review(monday, "8.0", READING, SPANISH).replaceFirst("\\{", "{ \"grade\": \"A\","));
+		var saved = save(review(monday, "8.0", READING, SPANISH).replaceFirst("\\{", "{ \"grade\": \"A\","));
 
 		assertThat(saved.weekStart()).isEqualTo(monday);
 		assertThat(saved.score()).isEqualByComparingTo("8");
@@ -85,7 +86,7 @@ class ReviewTests {
 		assertThat(saved.areaScores().get(0).actual()).isEqualByComparingTo("90");
 		assertThat(saved.areaScores().get(0).target()).isEqualByComparingTo("150");
 		assertThat(saved.areaScores().get(1).score()).isEqualByComparingTo("9");
-		assertThat(reviews.run(List.of())).containsExactly(saved);
+		assertThat(reviews.run(args())).containsExactly(saved);
 	}
 
 	@Test
@@ -94,9 +95,9 @@ class ReviewTests {
 		jdbc.sql("update lockin.reviews set created_at = created_at - interval '1 day', updated_at = updated_at - interval '1 day'")
 			.update();
 
-		Review replaced = save(review(monday, "7.9", READING, SPANISH).replace("a B.", "still a B."));
+		var replaced = save(review(monday, "7.9", READING, SPANISH).replace("a B.", "still a B."));
 
-		assertThat(reviews.run(List.of("--last", "52"))).containsExactly(replaced);
+		assertThat(reviews.run(args("--last=52"))).containsExactly(replaced);
 		assertThat(replaced.score()).isEqualByComparingTo("7.9");
 		assertThat(replaced.summary()).endsWith("still a B.");
 		assertThat(jdbc.sql("select updated_at > created_at from lockin.reviews").query(Boolean.class).single()).isTrue();
@@ -109,7 +110,7 @@ class ReviewTests {
 			.replaceAll("\"summary\": \".*\"", "\"summary\": \"" + "x".repeat(1500) + "\""));
 		save(review(monday.minusWeeks(1), "8.1", READING, SPANISH));
 
-		assertThat(reviews.run(List.of("--last", "2"))).extracting(Review::score)
+		assertThat(reviews.run(args("--last=2"))).extracting(Review::score)
 			.usingElementComparator(BigDecimal::compareTo)
 			.containsExactly(new BigDecimal("6.7"), new BigDecimal("8.1"));
 	}
@@ -149,24 +150,24 @@ class ReviewTests {
 		assertThatThrownBy(() -> save(review(monday, "8.0", READING, SPANISH.replace("\"comment\"", "\"note\": \"\", \"comment\""))))
 			.isInstanceOf(JacksonException.class)
 			.hasMessageContaining("note");
-		assertThat(reviews.run(List.of())).isEmpty();
+		assertThat(reviews.run(args())).isEmpty();
 	}
 
 	@Test
 	void reviewsReturnsTheLastNNewestFirst() {
-		for (int weeks = 3; weeks >= 0; weeks--) {
+		for (var weeks = 3; weeks >= 0; weeks--) {
 			save(review(monday.minusWeeks(weeks), "8.0", READING, SPANISH));
 		}
 
-		assertThat(reviews.run(List.of())).extracting(Review::weekStart).containsExactly(monday);
-		assertThat(reviews.run(List.of("--last", "3"))).extracting(Review::weekStart)
+		assertThat(reviews.run(args())).extracting(Review::weekStart).containsExactly(monday);
+		assertThat(reviews.run(args("--last=3"))).extracting(Review::weekStart)
 			.containsExactly(monday, monday.minusWeeks(1), monday.minusWeeks(2));
-		assertThat(reviews.run(List.of("--last", "52"))).hasSize(4);
-		assertThatThrownBy(() -> reviews.run(List.of("--last", "0")))
+		assertThat(reviews.run(args("--last=52"))).hasSize(4);
+		assertThatThrownBy(() -> reviews.run(args("--last=0")))
 			.hasMessage("--last must be a whole number from 1 to 52: 0");
-		assertThatThrownBy(() -> reviews.run(List.of("--last", "53")))
+		assertThatThrownBy(() -> reviews.run(args("--last=53")))
 			.hasMessage("--last must be a whole number from 1 to 52: 53");
-		assertThatThrownBy(() -> reviews.run(List.of("--last", "two")))
+		assertThatThrownBy(() -> reviews.run(args("--last=two")))
 			.hasMessage("--last must be a whole number from 1 to 52: two");
 	}
 
@@ -186,7 +187,7 @@ class ReviewTests {
 
 	private Review save(String json) {
 		System.setIn(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
-		return save.run(List.of());
+		return save.run(args());
 	}
 
 }

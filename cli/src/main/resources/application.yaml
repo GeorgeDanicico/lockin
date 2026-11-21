@@ -13,5 +13,5 @@ spring:
     deserialization:
       fail-on-unknown-properties: true     # a typo in input JSON is an error, not a silently dropped field
 lockin:
-  zone: ${LOCKIN_TZ}
+  zone: ${LOCKIN_TZ:Europe/Bucharest}   # IANA name; "today" and "last week" are in this zone
   max-backfill-days: 7

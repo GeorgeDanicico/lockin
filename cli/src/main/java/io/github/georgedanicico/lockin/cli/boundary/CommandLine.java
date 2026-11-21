@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.boot.ExitCodeGenerator;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.stereotype.Component;
@@ -15,7 +16,8 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Runs the command named by the first one or two arguments ({@code ping}, {@code areas show}).
+ * Runs the command named by the first one or two arguments ({@code ping}, {@code areas show}), with
+ * the arguments after its name ({@code entry delete --id=<uuid>}).
  * The result goes to stdout as JSON; an error goes to stderr as {@code {"error":…,"details":…}}
  * with exit code 2 (bad call or invalid input) or 1 (failure).
  */
@@ -40,13 +42,13 @@ class CommandLine implements ApplicationRunner, ExitCodeGenerator {
 	@Override
 	public void run(ApplicationArguments arguments) {
 		exitCode = 0;
-		List<String> args = List.of(arguments.getSourceArgs());
+		var args = List.of(arguments.getSourceArgs());
 		if (args.isEmpty()) {
 			fail(2, "no_command", Map.of("commands", commandNames()));
 			return;
 		}
-		for (int words = Math.min(2, args.size()); words > 0; words--) {
-			Command command = commands.get(String.join(" ", args.subList(0, words)));
+		for (var words = Math.min(2, args.size()); words > 0; words--) {
+			var command = commands.get(String.join(" ", args.subList(0, words)));
 			if (command != null) {
 				execute(command, args.subList(words, args.size()));
 				return;
@@ -60,9 +62,11 @@ class CommandLine implements ApplicationRunner, ExitCodeGenerator {
 		return exitCode;
 	}
 
+	/** Runs the command with the arguments after its name, so its options and other arguments are its own. */
 	private void execute(Command command, List<String> args) {
 		try {
-			System.out.println(json.writeValueAsString(command.run(args)));
+			var result = command.run(new DefaultApplicationArguments(args.toArray(String[]::new)));
+			System.out.println(json.writeValueAsString(result));
 		}
 		catch (IllegalArgumentException | JacksonException e) {
 			fail(2, "invalid_input", message(e));

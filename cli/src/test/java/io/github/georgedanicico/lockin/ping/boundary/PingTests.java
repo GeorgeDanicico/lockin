@@ -1,7 +1,6 @@
 package io.github.georgedanicico.lockin.ping.boundary;
 
 import java.time.ZoneId;
-import java.util.List;
 import java.util.Map;
 
 import io.github.georgedanicico.lockin.TestDatabase;
@@ -12,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 
+import static io.github.georgedanicico.lockin.TestArguments.args;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
@@ -26,7 +26,7 @@ class PingTests {
 
 	@Test
 	void answersOk() {
-		assertThat(ping.run(List.of())).isEqualTo(Map.of("ok", true));
+		assertThat(ping.run(args())).isEqualTo(Map.of("ok", true));
 	}
 
 	@Test

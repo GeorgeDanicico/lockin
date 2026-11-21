@@ -4,10 +4,7 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.TemporalAdjusters;
-import java.util.List;
-
 import io.github.georgedanicico.lockin.cli.boundary.Command;
-import io.github.georgedanicico.lockin.cli.boundary.Options;
 import io.github.georgedanicico.lockin.cli.control.LockinProperties;
 import io.github.georgedanicico.lockin.review.control.WeekRepository;
 import io.github.georgedanicico.lockin.review.entity.AreaScore;
@@ -18,10 +15,11 @@ import io.github.georgedanicico.lockin.review.entity.Review;
 import io.github.georgedanicico.lockin.review.entity.WeekReport;
 
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
+import org.springframework.boot.ApplicationArguments;
 import org.springframework.stereotype.Component;
 
 /**
- * {@code lockin week [--week-start YYYY-MM-DD]}: everything the weekly review needs. Default: the
+ * {@code lockin week [--week-start=YYYY-MM-DD]}: everything the weekly review needs. Default: the
  * last completed Monday–Sunday week.
  */
 @Component
@@ -44,8 +42,8 @@ class Week implements Command {
 	}
 
 	@Override
-	public WeekReport run(List<String> args) {
-		LocalDate weekStart = Options.value(args, "--week-start")
+	public WeekReport run(ApplicationArguments args) {
+		var weekStart = Command.option(args, "week-start")
 			.map(Week::monday)
 			.orElseGet(() -> properties.today().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1));
 		return weeks.report(weekStart);

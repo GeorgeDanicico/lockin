@@ -37,9 +37,9 @@ public class AreaRepository {
 	@Transactional
 	public void save(List<Area> areas) {
 		require(!areas.isEmpty(), "at least one area is required");
-		List<String> slugs = areas.stream().map(Area::slug).toList();
+		var slugs = areas.stream().map(Area::slug).toList();
 		require(new HashSet<>(slugs).size() == slugs.size(), "each slug may appear only once: " + slugs);
-		for (Area area : areas) {
+		for (var area : areas) {
 			jdbc.sql("""
 					insert into lockin.areas (slug, name, unit, weekly_target, weight, rubric)
 					values (:slug, :name, :unit, :weeklyTarget, :weight, :rubric)
@@ -61,8 +61,8 @@ public class AreaRepository {
 	@Transactional
 	public void remove(List<String> slugs) {
 		require(!slugs.isEmpty(), "at least one slug is required");
-		List<String> active = active().stream().map(Area::slug).toList();
-		List<String> unknown = slugs.stream().filter(slug -> !active.contains(slug)).toList();
+		var active = active().stream().map(Area::slug).toList();
+		var unknown = slugs.stream().filter(slug -> !active.contains(slug)).toList();
 		require(unknown.isEmpty(), "not active areas: " + unknown + "; active areas: " + active);
 		jdbc.sql("update lockin.areas set is_active = false where slug in (:slugs)").param("slugs", slugs).update();
 	}

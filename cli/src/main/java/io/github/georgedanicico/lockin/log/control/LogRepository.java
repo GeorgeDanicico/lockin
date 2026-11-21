@@ -5,7 +5,6 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -43,19 +42,19 @@ public class LogRepository {
 	 */
 	@Transactional
 	public Note save(LogRequest request, boolean force) {
-		LocalDate today = properties.today();
-		int maxBackfillDays = properties.maxBackfillDays();
+		var today = properties.today();
+		var maxBackfillDays = properties.maxBackfillDays();
 		require(!request.day().isAfter(today), "day " + request.day() + " is in the future; today is " + today);
 		require(force || !request.day().isBefore(today.minusDays(maxBackfillDays)),
 				"day " + request.day() + " is more than " + maxBackfillDays + " days ago; pass --force to log it anyway");
-		List<Area> active = areas.active();
-		Map<String, Unit> units = active.stream().collect(Collectors.toMap(Area::slug, Area::unit));
-		for (LogRequest.Item item : request.entries()) {
+		var active = areas.active();
+		var units = active.stream().collect(Collectors.toMap(Area::slug, Area::unit));
+		for (var item : request.entries()) {
 			if (item.area() == null) {
 				require(item.quantity() == null, "entry " + item.description() + ": entries with no area take no quantity");
 				continue;
 			}
-			Unit unit = units.get(item.area());
+			var unit = units.get(item.area());
 			require(unit != null, "not an active area: " + item.area() + "; active areas: "
 					+ active.stream().map(Area::slug).toList() + ", or other for none");
 			require(item.quantity() == null || unit == Unit.MINUTES || unit == Unit.COUNT, "entry " + item.description()
@@ -63,14 +62,14 @@ public class LogRepository {
 		}
 
 		// now() is the same for the whole transaction; clock_timestamp() keeps the input order.
-		UUID noteId = jdbc.sql("""
+		var noteId = jdbc.sql("""
 				insert into lockin.daily_notes (day, raw_text, created_at)
 				values (:day, :text, clock_timestamp())
 				returning id
 				""").param("day", request.day()).param("text", request.note()).query(UUID.class).single();
-		List<Entry> entries = new ArrayList<>();
-		for (LogRequest.Item item : request.entries()) {
-			UUID entryId = jdbc.sql("""
+		var entries = new ArrayList<Entry>();
+		for (var item : request.entries()) {
+			var entryId = jdbc.sql("""
 					insert into lockin.entries (note_id, area_id, description, quantity, created_at)
 					values (:noteId, (select id from lockin.areas where slug = :area), :description, :quantity,
 					        clock_timestamp())
@@ -113,13 +112,13 @@ public class LogRepository {
 	/** Deletes the note and, through the foreign key, its entries. */
 	@Transactional
 	public Note deleteNote(UUID id) {
-		Note note = note(id);
+		var note = note(id);
 		jdbc.sql("delete from lockin.daily_notes where id = :id").param("id", id).update();
 		return note;
 	}
 
 	private Note note(UUID id) {
-		List<Entry> entries = jdbc.sql("""
+		var entries = jdbc.sql("""
 				select e.id, a.slug as area, e.description, e.quantity
 				from lockin.entries e
 				left join lockin.areas a on a.id = e.area_id

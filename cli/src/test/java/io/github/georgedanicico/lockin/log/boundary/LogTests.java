@@ -26,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.transaction.annotation.Transactional;
 
+import static io.github.georgedanicico.lockin.TestArguments.args;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -76,7 +77,7 @@ class LogTests {
 
 	@Test
 	void logSavesTheNoteWordForWordWithItsEntries() {
-		Note saved = log(today, NOTE, """
+		var saved = log(today, NOTE, """
 				{ "area": "reading", "description": "Read a book", "quantity": 10 },
 				{ "area": "spanish", "description": "Duolingo lesson" },
 				{ "area": "reading", "description": "Read a few articles" },
@@ -94,20 +95,20 @@ class LogTests {
 			.containsExactly("reading", "spanish", "reading", "relationship", "push-ups", null, null, null);
 		assertThat(saved.entries().get(0).quantity()).isEqualByComparingTo("10");
 		assertThat(saved.entries().get(1).quantity()).isNull();
-		assertThat(day.run(List.of())).containsExactly(saved);
+		assertThat(day.run(args())).containsExactly(saved);
 	}
 
 	@Test
 	void logSavesANoteWithNothingMapped() {
-		Note saved = log(today, "Rest day", "");
+		var saved = log(today, "Rest day", "");
 
 		assertThat(saved.entries()).isEmpty();
-		assertThat(day.run(List.of())).containsExactly(saved);
+		assertThat(day.run(args())).containsExactly(saved);
 	}
 
 	@Test
 	void logPrintsSnakeCaseWithTheAreaSlug() {
-		Note saved = log(today, "Fixed the sink", """
+		var saved = log(today, "Fixed the sink", """
 				{ "description": "Fixed the sink" }""");
 
 		assertThat(json.writeValueAsString(saved)).isEqualTo("{\"id\":\"" + saved.id() + "\",\"day\":\"" + today
@@ -125,7 +126,7 @@ class LogTests {
 		assertThatThrownBy(() -> log(today, NOTE, """
 				{ "area": "spanish", "description": "Duolingo lesson" }"""))
 			.hasMessageStartingWith("not an active area: spanish;");
-		assertThat(day.run(List.of())).isEmpty();
+		assertThat(day.run(args())).isEmpty();
 	}
 
 	@Test
@@ -148,13 +149,13 @@ class LogTests {
 		assertThatThrownBy(() -> log(today, NOTE, """
 				{ "area": "push-ups", "description": "Push-ups", "quantity": -5 }"""))
 			.hasRootCauseMessage("entry Push-ups: quantity must be greater than 0");
-		assertThat(day.run(List.of())).isEmpty();
+		assertThat(day.run(args())).isEmpty();
 	}
 
 	@Test
 	void logChecksTheDay() {
-		int max = properties.maxBackfillDays();
-		LocalDate tooOld = today.minusDays(max + 1);
+		var max = properties.maxBackfillDays();
+		var tooOld = today.minusDays(max + 1);
 
 		assertThatThrownBy(() -> log("""
 				{ "note": "Rest day", "entries": [] }""")).hasRootCauseMessage("day is required");
@@ -190,16 +191,16 @@ class LogTests {
 
 	@Test
 	void dayShowsTheNotesOfOneDayOldestFirst() {
-		LocalDate yesterday = today.minusDays(1);
-		Note first = log(yesterday, "Read a bit", """
+		var yesterday = today.minusDays(1);
+		var first = log(yesterday, "Read a bit", """
 				{ "area": "reading", "description": "Read a book", "quantity": 15 }""");
-		Note second = log(yesterday, "Spanish too", """
+		var second = log(yesterday, "Spanish too", """
 				{ "area": "spanish", "description": "Duolingo lesson" }""");
 		log(today, "Rest day", "");
 
-		assertThat(day.run(List.of("--day", yesterday.toString()))).containsExactly(first, second);
-		assertThat(day.run(List.of("--day", today.minusDays(2).toString()))).isEmpty();
-		assertThatThrownBy(() -> day.run(List.of("--day", "yesterday"))).isInstanceOf(IllegalArgumentException.class)
+		assertThat(day.run(args("--day=" + yesterday))).containsExactly(first, second);
+		assertThat(day.run(args("--day=" + today.minusDays(2)))).isEmpty();
+		assertThatThrownBy(() -> day.run(args("--day=yesterday"))).isInstanceOf(IllegalArgumentException.class)
 			.hasMessage("--day must be YYYY-MM-DD: yesterday");
 	}
 
@@ -209,48 +210,48 @@ class LogTests {
 				{ "area": "spanish", "description": "Duolingo lesson" }""");
 		areas.remove(List.of("spanish"));
 
-		assertThat(day.run(List.of()).get(0).entries()).extracting(Entry::area).containsExactly("spanish");
+		assertThat(day.run(args()).get(0).entries()).extracting(Entry::area).containsExactly("spanish");
 	}
 
 	@Test
 	void entryDeleteDeletesOneEntry() {
-		Note saved = log(today, NOTE, """
+		var saved = log(today, NOTE, """
 				{ "area": "reading", "description": "Read a book", "quantity": 10 },
 				{ "area": "other", "description": "Fixed the sink" }""");
-		Entry reading = saved.entries().get(0);
+		var reading = saved.entries().get(0);
 
-		assertThat(entryDelete.run(List.of("--id", reading.id().toString()))).isEqualTo(reading);
-		assertThat(day.run(List.of()).get(0).entries()).containsExactly(saved.entries().get(1));
-		assertThat(entryDelete.run(List.of("--id", saved.entries().get(1).id().toString())).area()).isNull();
-		assertThat(day.run(List.of())).extracting(Note::text).containsExactly(NOTE);
+		assertThat(entryDelete.run(args("--id=" + reading.id()))).isEqualTo(reading);
+		assertThat(day.run(args()).get(0).entries()).containsExactly(saved.entries().get(1));
+		assertThat(entryDelete.run(args("--id=" + saved.entries().get(1).id())).area()).isNull();
+		assertThat(day.run(args())).extracting(Note::text).containsExactly(NOTE);
 	}
 
 	@Test
 	void noteDeleteDeletesTheNoteAndItsEntries() {
-		Note saved = log(today, NOTE, """
+		var saved = log(today, NOTE, """
 				{ "area": "reading", "description": "Read a book", "quantity": 10 },
 				{ "area": "spanish", "description": "Duolingo lesson" }""");
-		Note other = log(today, "Rest day", "");
+		var other = log(today, "Rest day", "");
 
-		assertThat(noteDelete.run(List.of("--id", saved.id().toString()))).isEqualTo(saved);
-		assertThat(day.run(List.of())).containsExactly(other);
-		assertThatThrownBy(() -> entryDelete.run(List.of("--id", saved.entries().get(0).id().toString())))
+		assertThat(noteDelete.run(args("--id=" + saved.id()))).isEqualTo(saved);
+		assertThat(day.run(args())).containsExactly(other);
+		assertThatThrownBy(() -> entryDelete.run(args("--id=" + saved.entries().get(0).id())))
 			.as("the entries went with the note")
 			.hasMessageStartingWith("no entry with id");
 	}
 
 	@Test
 	void deleteNeedsAKnownId() {
-		UUID unknown = UUID.randomUUID();
+		var unknown = UUID.randomUUID();
 
-		assertThatThrownBy(() -> entryDelete.run(List.of())).hasMessage("--id is required");
-		assertThatThrownBy(() -> noteDelete.run(List.of())).hasMessage("--id is required");
-		assertThatThrownBy(() -> entryDelete.run(List.of("--id", "abc"))).isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> noteDelete.run(List.of("--id", "abc"))).isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> entryDelete.run(List.of("--id", unknown.toString())))
+		assertThatThrownBy(() -> entryDelete.run(args())).hasMessage("--id is required");
+		assertThatThrownBy(() -> noteDelete.run(args())).hasMessage("--id is required");
+		assertThatThrownBy(() -> entryDelete.run(args("--id=abc"))).isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> noteDelete.run(args("--id=abc"))).isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> entryDelete.run(args("--id=" + unknown)))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessage("no entry with id " + unknown);
-		assertThatThrownBy(() -> noteDelete.run(List.of("--id", unknown.toString())))
+		assertThatThrownBy(() -> noteDelete.run(args("--id=" + unknown)))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessage("no note with id " + unknown);
 	}
@@ -263,7 +264,7 @@ class LogTests {
 
 	private Note log(String input, String... args) {
 		System.setIn(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
-		return log.run(List.of(args));
+		return log.run(args(args));
 	}
 
 	private static Area area(String slug, Unit unit) {

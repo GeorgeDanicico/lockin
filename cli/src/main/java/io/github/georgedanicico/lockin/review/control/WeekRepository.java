@@ -33,8 +33,8 @@ public class WeekRepository {
 	/** The week that starts on the given Monday, with the last 4 reviews before it. */
 	@Transactional(readOnly = true) // one connection for all the queries, as there is no pool
 	public WeekReport report(LocalDate weekStart) {
-		LocalDate weekEnd = weekStart.plusDays(6);
-		List<AreaTotal> totals = jdbc.sql("""
+		var weekEnd = weekStart.plusDays(6);
+		var totals = jdbc.sql("""
 				select a.slug, a.name, a.unit, a.weekly_target, a.weight, a.rubric,
 				       case a.unit
 				         when 'sessions' then count(e.id)
@@ -53,7 +53,7 @@ public class WeekRepository {
 			.param("weekEnd", weekEnd)
 			.query(WeekRepository::total)
 			.list();
-		Map<LocalDate, List<String>> notes = jdbc.sql("""
+		var notes = jdbc.sql("""
 				select day, raw_text
 				from lockin.daily_notes
 				where day between :weekStart and :weekEnd
@@ -65,7 +65,7 @@ public class WeekRepository {
 			.stream()
 			.collect(Collectors.groupingBy(Map.Entry::getKey, TreeMap::new,
 					Collectors.mapping(Map.Entry::getValue, Collectors.toList())));
-		Map<LocalDate, List<LoggedEntry>> entries = jdbc.sql("""
+		var entries = jdbc.sql("""
 				select n.day, a.slug, e.description, e.quantity
 				from lockin.entries e
 				join lockin.daily_notes n on n.id = e.note_id
@@ -79,11 +79,11 @@ public class WeekRepository {
 					new LoggedEntry(row.getString("slug"), row.getString("description"), row.getBigDecimal("quantity"))))
 			.stream()
 			.collect(Collectors.groupingBy(Map.Entry::getKey, Collectors.mapping(Map.Entry::getValue, Collectors.toList())));
-		List<LoggedDay> days = notes.entrySet()
+		var days = notes.entrySet()
 			.stream()
 			.map(day -> new LoggedDay(day.getKey(), day.getValue(), entries.getOrDefault(day.getKey(), List.of())))
 			.toList();
-		List<LocalDate> unlogged = weekStart.datesUntil(weekEnd.plusDays(1)).filter(day -> !notes.containsKey(day)).toList();
+		var unlogged = weekStart.datesUntil(weekEnd.plusDays(1)).filter(day -> !notes.containsKey(day)).toList();
 		return new WeekReport(weekStart, weekEnd, totals, days, unlogged, reviews.before(weekStart, 4));
 	}
 
