@@ -20,3 +20,6 @@ supabase/.branches/
 
 # Logs
 logs/
+
+# Agent worktrees
+.claude/worktrees/

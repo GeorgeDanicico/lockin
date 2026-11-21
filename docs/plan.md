@@ -275,14 +275,13 @@ with a non-zero exit code.
 | `lockin areas show` | Active areas with units, targets, weights, rubrics, sorted by slug. **Done.** |
 | `lockin areas save` | Reads an array of one or more `{ "slug", "name", "unit", "weekly_target", "weight"?, "rubric" }` from stdin (weight defaults to 1). In one transaction, creates each area or updates the one with the same slug, making it active again; other areas aren't touched. Rejects an empty list, a repeated slug, a bad slug, an unknown unit, a target or weight ≤ 0, a blank name or rubric, and unknown fields. Prints the saved areas. **Done.** |
 | `lockin areas remove <slug>...` | Sets one or more areas inactive (never deleted, so their entries keep their area). Every slug must be an active area, or nothing changes. Prints the removed slugs. **Done.** |
-| `lockin log` | Reads from stdin `{ "day", "note", "entries": [{ "area", "description", "quantity"? }] }` and saves the note and entries in one transaction. Rejects unknown area slugs (the error lists the valid ones), `quantity` on `sessions`/`days` areas, future days, and days older than `max-backfill-days` unless `--force`. Prints what was saved, with ids. |
-| `lockin day [--day YYYY-MM-DD]` | Notes and entries of one day (default today). For confirming and correcting. |
-| `lockin entry delete --id` | Deletes one entry. |
-| `lockin note delete --id` | Deletes a note and its entries. |
-| `lockin week [--week-start YYYY-MM-DD]` | Everything the review needs in one call: active areas, **per-area actual vs target computed in SQL**, entries grouped by day, the unlogged days, the last 4 reviews. Default: the last completed Monday–Sunday week in `lockin.zone`. |
-| `lockin review save` | Reads from stdin, validates and saves a review: `week_start` is a Monday of a completed week, every active area scored once, scores 0–10, `summary` ≤ 1,500 characters. Replaces an existing review of that week. |
-| `lockin review latest [--summary]` | The latest review (JSON, or just the summary text), with the letter grade worked out from the score. |
-| `lockin reviews --last N` | The last N reviews, for trends. |
+| `lockin log [--force]` | Reads from stdin `{ "day", "note", "entries"?: [{ "area"?, "description", "quantity"? }] }` and saves the note and entries in one transaction. `area` omitted, null or `"other"` = no area. Rejects an area that isn't active (the error lists the active ones), a `quantity` on `sessions`/`days` areas or on "other", a quantity ≤ 0, a blank description, a note over 4,000 characters, future days, and days older than `max-backfill-days` unless `--force`. Prints the saved note: `{ "id", "day", "text", "entries": [{ "id", "area", "description", "quantity" }] }`. **Done.** |
+| `lockin day [--day YYYY-MM-DD]` | The day's notes (default today), oldest first, in the same shape. For confirming and correcting. **Done.** |
+| `lockin entry delete --id <uuid>` | Deletes one entry; prints it. **Done.** |
+| `lockin note delete --id <uuid>` | Deletes a note and its entries; prints them. **Done.** |
+| `lockin week [--week-start YYYY-MM-DD]` | Everything the review needs in one call: `week_start`, `week_end`, active `areas` each with its `actual` **computed in SQL**, `days` (each with its note texts and entries), `unlogged_days`, and `recent_reviews` (the last 4 before this week). Default: the last completed Monday–Sunday week in `lockin.zone`; `--week-start` must be a Monday. **Done.** |
+| `lockin review save` | Reads from stdin `{ "week_start", "score", "area_scores": [{ "slug", "actual", "target", "score", "comment" }], "summary" }`. Checks: `week_start` is a Monday of a completed week; every active area scored exactly once; scores 0–10; `score` has at most one decimal and is within 0.1 of the weighted average of the area scores; `summary` 1–1,500 characters. Replaces an existing review of that week. Prints the saved review. **Done.** |
+| `lockin reviews [--last N]` | The last N reviews (default 1, at most 52), newest first: `{ "week_start", "score", "grade", "area_scores", "summary" }`, with the grade worked out from the score. **Done.** |
 
 Example `log` input:
 
@@ -313,8 +312,8 @@ the result to print), `control` (logic and SQL, only when there is some: a one-q
 | `cli` | `Command`, `CommandLine` (dispatch, JSON on stdout, errors on stderr, exit codes), `Input` (reads JSON from stdin) | | |
 | `ping` | `Ping` | | |
 | `areas` | `AreasShow`, `AreasSave`, `AreasRemove` | `AreaRepository` (`JdbcClient`) | `Area` (checks its own rules), `Unit` |
-| `log` | `Log`, `Day`, `EntryDelete`, `NoteDelete` | log validation | `Note`, `Entry`, `LogRequest` |
-| `review` | `Week`, `ReviewSave`, `ReviewLatest`, `Reviews` | weekly totals (SQL), review validation | `WeekReport`, `AreaTotal`, `Review`, `AreaScore` |
+| `log` | `Log`, `Day`, `EntryDelete`, `NoteDelete` | `LogRepository` (log rules, SQL) | `LogRequest`, `Note`, `Entry` |
+| `review` | `Week`, `ReviewSave`, `Reviews` | `WeekRepository` (weekly totals in SQL), `ReviewRepository` (review rules, SQL) | `WeekReport`, `AreaTotal`, `LoggedDay`, `LoggedEntry`, `Review`, `AreaScore` |
 
 - JSON is snake_case (`weekly_target`), like the database, and unknown fields are rejected.
 - Invalid input (`IllegalArgumentException`, or a JSON error) exits 2 with
@@ -338,7 +337,7 @@ the result to print), `control` (logic and SQL, only when there is some: a one-q
 
 ### Done when
 
-- [ ] All commands work on the JVM against the Testcontainers database.
+- [x] All commands work on the JVM against the Testcontainers database (37 tests).
 - [ ] `./mvnw -PnativeTest test` passes.
 
 ## Step 4: native build and deploy
