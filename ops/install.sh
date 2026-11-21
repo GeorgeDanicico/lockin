@@ -5,12 +5,14 @@
 #   <prefix>/lib/lockin/lockin-bin   the binary (the one before it is kept as lockin-bin.previous)
 #   <prefix>/bin/lockin              the wrapper (ops/lockin), which loads the database login
 #   <skills dir>/<name>              a symlink to each skills/<name> in this checkout
+#   <prefix>/lib/lockin/weekly-review.sh and lockin-review.{service,timer} in the systemd user dir
 set -Eeuo pipefail
 repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 commit="${LOCKIN_COMMIT:-$(git -C "$repo" rev-parse HEAD)}"
 prefix="${LOCKIN_PREFIX:-$HOME/.local}"
 env_file="${LOCKIN_ENV_FILE:-$HOME/.config/lockin/env}"
 skills_dir="${LOCKIN_SKILLS_DIR:-$HOME/.claude/skills}"
+units_dir="${LOCKIN_UNITS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 release_url="${LOCKIN_RELEASE_URL:-https://github.com/GeorgeDanicico/lockin/releases/download/builds}"
 lib="$prefix/lib/lockin"
 asset="lockin-linux-$(uname -m)-$commit"
@@ -67,5 +69,18 @@ if [[ -d "$repo/skills" ]]; then
     fi
     ln -sfn -- "${skill%/}" "$link"
   done
+fi
+
+# The weekly review timer. Installing it doesn't enable it: that is done once by hand
+# (systemctl --user enable --now lockin-review.timer) and stays enabled across deploys.
+install -m 755 "$repo/ops/weekly-review.sh" "$lib/weekly-review.sh"
+tz="$(sed -n "s/^LOCKIN_TZ=//p" "$env_file" | tail -n 1 | tr -d "\"' ")"
+tz="${tz:-Europe/Bucharest}"
+mkdir -p "$units_dir"
+sed "s|@prefix@|$prefix|g" "$repo/ops/systemd/lockin-review.service" > "$units_dir/lockin-review.service"
+sed "s|@tz@|$tz|g" "$repo/ops/systemd/lockin-review.timer" > "$units_dir/lockin-review.timer"
+if ! systemctl --user daemon-reload 2>/dev/null; then
+  echo "Installed the review timer, but couldn't reach the systemd user manager:" >&2
+  echo "run systemctl --user daemon-reload as $(id -un) once." >&2
 fi
 echo "Installed lockin $commit in $prefix."

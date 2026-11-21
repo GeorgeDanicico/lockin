@@ -1,0 +1,12 @@
+# Installed into ~/.config/systemd/user/ by ops/install.sh, which fills in @prefix@.
+[Unit]
+Description=Weekly Lock In review
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# A user service starts with a minimal PATH; lockin and claude live in ~/.local/bin.
+Environment=PATH=@prefix@/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@prefix@/lib/lockin/weekly-review.sh
+TimeoutStartSec=20min

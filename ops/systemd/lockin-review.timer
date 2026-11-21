@@ -1,0 +1,11 @@
+# Installed into ~/.config/systemd/user/ by ops/install.sh, which fills in @tz@ from LOCKIN_TZ.
+[Unit]
+Description=Weekly Lock In review, Mondays at 05:00
+
+[Timer]
+OnCalendar=Mon *-*-* 05:00:00 @tz@
+# Runs a missed review once the VPS is back up.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
