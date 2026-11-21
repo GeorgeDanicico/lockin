@@ -1,0 +1,24 @@
+[
+  {
+    "slug": "reading",
+    "name": "Reading",
+    "unit": "minutes",
+    "weekly_target": 150,
+    "rubric": "10: 150 minutes or more, spread over at least 4 days. Lower in proportion to the minutes missed, and by 1 if it was all on one or two days."
+  },
+  {
+    "slug": "spanish",
+    "name": "Spanish",
+    "unit": "days",
+    "weekly_target": 7,
+    "rubric": "10: a lesson every day. About 1.5 points less for each missed day."
+  },
+  {
+    "slug": "relationship",
+    "name": "Relationship",
+    "unit": "sessions",
+    "weekly_target": 3,
+    "weight": 2,
+    "rubric": "10: at least 3 times of real attention together, phones away. 7 for 2, 4 for 1, 0 for none."
+  }
+]

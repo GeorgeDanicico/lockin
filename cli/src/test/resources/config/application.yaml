@@ -1,0 +1,3 @@
+# Test-only settings. Spring Boot loads config/application.yaml on top of application.yaml.
+lockin:
+  zone: Europe/Bucharest

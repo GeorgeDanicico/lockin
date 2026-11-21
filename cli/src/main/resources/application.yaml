@@ -1,0 +1,17 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  main:
+    banner-mode: off   # the banner goes to stdout, which carries only JSON
+  datasource:
+    url: ${LOCKIN_DB_URL}
+    username: ${LOCKIN_DB_USER}
+    password: ${LOCKIN_DB_PASSWORD}
+    type: org.springframework.jdbc.datasource.SimpleDriverDataSource   # no pool for a one-shot CLI
+  jackson:
+    property-naming-strategy: SNAKE_CASE   # weekly_target, like the database
+    deserialization:
+      fail-on-unknown-properties: true     # a typo in input JSON is an error, not a silently dropped field
+lockin:
+  zone: ${LOCKIN_TZ}
+  max-backfill-days: 7

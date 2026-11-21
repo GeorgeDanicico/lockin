@@ -32,7 +32,7 @@ Monday       iPhone Shortcut ──GET + x-lockin-key──▶ Edge Function `lo
 | Which credentials does the CLI use? | **A dedicated `lockin_writer` role**, not the service-role key. | The service-role key bypasses row-level security on every table, family expenses included. An unattended Claude must not hold it. `lockin_writer` can touch only the `lockin` schema. |
 | How does the CLI connect? | **JDBC through the Supabase session pooler** (port 5432 on the pooler host). | The direct connection is IPv6-only, and the VPS may not have IPv6. The session pooler is the IPv4 way in and behaves like plain Postgres (prepared statements work). The username must be `lockin_writer.<project-ref>`. If the VPS has working IPv6 (`curl -6 https://ifconfig.co`), the direct connection works just as well. |
 | Migrations? | **Plain SQL files in this repo (`db/NNN_*.sql`), run once by hand in the Supabase SQL Editor.** | The tables have nothing to do with the family hub, so they stay out of its `supabase/migrations/`. `supabase db push` compares only migration history, not the schema, so tables created by hand don't break it. Never run `supabase db push` from this repo: two repos pushing migrations to one project conflict. |
-| Spring or picocli? | **Spring Boot 4 + Spring Shell 4**, non-interactive mode. | picocli's last release found is 4.7.7 (April 2025). Spring Shell 4.0 went GA in December 2025 (latest patch found: 4.0.3, June 2026), is built on Spring Framework 7 and requires Boot 4. |
+| Spring Shell, picocli, or plain Spring Boot? | **Plain Spring Boot 4**: an `ApplicationRunner` that dispatches on the first argument. | The step 2 spike failed Spring Shell 4.0.4: in non-interactive mode it couldn't parse `--file -`, exited 0 on parse errors and printed stack traces on others; working around it took more code than the dispatcher. picocli's last release found is 4.7.7 (April 2025). A dozen JSON-in, JSON-out commands need neither. |
 | JVM or native? | **GraalVM native image.** | Much less memory, near-instant start, and a one-shot CLI gains nothing from the JIT. The VPS is already busy with the app's containers (768 MB web, 256 MB worker). |
 | Scheduler? | **A systemd user timer**, not cron. | Debian/Ubuntu cron ignores `CRON_TZ`; systemd's `OnCalendar` takes a timezone. `Persistent=true` runs a missed review once the VPS is back, where cron would silently skip the week. Claude Code cloud routines are out: they run in Anthropic's cloud without the VPS's credentials. |
 | How does the review reach the phone? | **A Supabase Edge Function guarded by a key I generate.** | SSH from Shortcuts can't pass the VPS's 2FA, and a 2FA-exempt user isn't possible here. Supabase Storage would mean an upload credential on the VPS (service-role or S3 keys, both project-wide). The function reads the database with a read-only role, needs no new credential on the VPS, and isn't cached. |
@@ -43,8 +43,7 @@ Monday       iPhone Shortcut ──GET + x-lockin-key──▶ Edge Function `lo
 | Piece | Version |
 | --- | --- |
 | Java | 25 (LTS) |
-| Spring Boot | The newest 4.x that Spring Initializr allows together with Spring Shell 4.0.x (Initializr enforces the compatibility range) |
-| Spring Shell | 4.0.x, latest patch (4.0.3 or newer) |
+| Spring Boot | 4.2.0 |
 | GraalVM | 25 or newer (GraalVM Community 25 or Liberica NIK 25). Spring Boot 4 requires GraalVM 25+ for native images. |
 | Build | Maven with `spring-boot-starter-parent` (gives the `native` and `nativeTest` profiles) |
 | JSON | Jackson 3, through Boot 4's Jackson starter |
@@ -53,7 +52,7 @@ Monday       iPhone Shortcut ──GET + x-lockin-key──▶ Edge Function `lo
 
 ```
 lockin/
-  cli/                          Spring Boot 4 + Spring Shell 4 app (Maven)
+  cli/                          Spring Boot 4 app (Maven)
   db/
     001_schema.sql
     002_roles.sql
@@ -224,33 +223,33 @@ Rules:
 
 ## Step 2: Spring scaffold and spike (go / no-go)
 
-Spring Initializr: Java 25, Maven, dependencies **Spring Shell, JDBC API, PostgreSQL Driver,
-Validation, GraalVM Native Support**, plus the Jackson starter.
+**Result: done.** Spring Shell 4.0.4 failed the checks below (see "Decisions and why"), so the
+no-go fallback was taken. Native `lockin ping`: about 20 ms, 47 MB max RSS (macOS, Apple Silicon).
+
+Dependencies: `spring-boot-starter-jdbc` (HikariCP excluded), `spring-boot-starter-jackson`,
+`postgresql`; for tests `spring-boot-starter-jdbc-test`, `spring-boot-testcontainers`,
+`testcontainers-postgresql`. Native build: `native-maven-plugin` from the Boot parent's `native`
+profile, image name `lockin`.
 
 `application.yaml`:
 
 ```yaml
 spring:
   main:
-    web-application-type: none
-    banner-mode: off
-  shell:
-    interactive:
-      enabled: false
+    banner-mode: off   # the banner goes to stdout, which carries only JSON
   datasource:
     url: ${LOCKIN_DB_URL}
     username: ${LOCKIN_DB_USER}
     password: ${LOCKIN_DB_PASSWORD}
     type: org.springframework.jdbc.datasource.SimpleDriverDataSource   # no pool for a one-shot CLI
-logging:
-  level:
-    root: warn
-lockin:
-  zone: ${LOCKIN_TZ}
-  max-backfill-days: 7
 ```
 
-- Logs go to **stderr only**. **stdout carries only command output**, because Claude reads it.
+`lockin.zone` (`LOCKIN_TZ`) and `lockin.max-backfill-days` (7) are added in step 3 with the first
+command that needs them.
+
+- Logs go to **stderr only** (`logback-spring.xml`, level WARN). **stdout carries only command
+  output**, because Claude reads it.
+- Exit codes: 0 ok, 2 bad call (unknown command, invalid input), 1 failure (database, startup).
 - Connection URL:
   `jdbc:postgresql://aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require`
   with user `lockin_writer.<project-ref>`.
@@ -258,13 +257,13 @@ lockin:
 Spike: one command, `lockin ping`, which runs `select 1` and prints `{"ok":true}`. Build it native
 and check:
 
-- [ ] Output appears in non-interactive mode (a bug was reported in Spring Shell 4.0 where it didn't).
-- [ ] A command can read JSON from stdin (`--file -`).
-- [ ] The exit code is non-zero on an error.
-- [ ] Start time and memory with `/usr/bin/time -v` (expected roughly 50–100 ms, 50–80 MB).
+- [x] Output appears on stdout, and nothing else does.
+- [x] A command can read JSON from stdin: `lockin areas save` (step 3).
+- [x] The exit code is non-zero on an error.
+- [x] Start time and memory (`/usr/bin/time -l` on macOS, `-v` on Linux).
 
-**No-go fallback:** if the first or second check fails, keep Boot 4 native but drop Spring Shell and
-use an `ApplicationRunner` with a small command dispatcher. Nothing else in the plan changes.
+**No-go fallback (taken):** keep Boot 4 native but drop Spring Shell and use an
+`ApplicationRunner` with a small command dispatcher. Nothing else in the plan changes.
 
 ## Step 3: CLI commands
 
@@ -273,14 +272,15 @@ with a non-zero exit code.
 
 | Command | Does |
 | --- | --- |
-| `lockin areas show` | Active areas with units, targets, weights, rubrics. |
-| `lockin areas apply --file areas.json` | Creates or updates areas, matched by slug. Areas missing from the file are set inactive (never deleted). |
-| `lockin log --file -` | Reads `{ "day", "note", "entries": [{ "area", "description", "quantity"? }] }` and saves the note and entries in one transaction. Rejects unknown area slugs (the error lists the valid ones), `quantity` on `sessions`/`days` areas, future days, and days older than `max-backfill-days` unless `--force`. Prints what was saved, with ids. |
+| `lockin areas show` | Active areas with units, targets, weights, rubrics, sorted by slug. **Done.** |
+| `lockin areas save` | Reads an array of one or more `{ "slug", "name", "unit", "weekly_target", "weight"?, "rubric" }` from stdin (weight defaults to 1). In one transaction, creates each area or updates the one with the same slug, making it active again; other areas aren't touched. Rejects an empty list, a repeated slug, a bad slug, an unknown unit, a target or weight ≤ 0, a blank name or rubric, and unknown fields. Prints the saved areas. **Done.** |
+| `lockin areas remove <slug>...` | Sets one or more areas inactive (never deleted, so their entries keep their area). Every slug must be an active area, or nothing changes. Prints the removed slugs. **Done.** |
+| `lockin log` | Reads from stdin `{ "day", "note", "entries": [{ "area", "description", "quantity"? }] }` and saves the note and entries in one transaction. Rejects unknown area slugs (the error lists the valid ones), `quantity` on `sessions`/`days` areas, future days, and days older than `max-backfill-days` unless `--force`. Prints what was saved, with ids. |
 | `lockin day [--day YYYY-MM-DD]` | Notes and entries of one day (default today). For confirming and correcting. |
 | `lockin entry delete --id` | Deletes one entry. |
 | `lockin note delete --id` | Deletes a note and its entries. |
 | `lockin week [--week-start YYYY-MM-DD]` | Everything the review needs in one call: active areas, **per-area actual vs target computed in SQL**, entries grouped by day, the unlogged days, the last 4 reviews. Default: the last completed Monday–Sunday week in `lockin.zone`. |
-| `lockin review save --file -` | Validates and saves a review: `week_start` is a Monday of a completed week, every active area scored once, scores 0–10, `summary` ≤ 1,500 characters. Replaces an existing review of that week. |
+| `lockin review save` | Reads from stdin, validates and saves a review: `week_start` is a Monday of a completed week, every active area scored once, scores 0–10, `summary` ≤ 1,500 characters. Replaces an existing review of that week. |
 | `lockin review latest [--summary]` | The latest review (JSON, or just the summary text), with the letter grade worked out from the score. |
 | `lockin reviews --last N` | The last N reviews, for trends. |
 
@@ -303,13 +303,24 @@ Example `log` input:
 
 ### Code layout (`cli/src/main/java/…/lockin/`)
 
-| Package | Contents |
-| --- | --- |
-| `config` | `LockinProperties` (`zone`, `maxBackfillDays`), `@RegisterReflectionForBinding` for every record read or written as JSON |
-| `model` | Records: `Area`, `Note`, `Entry`, `LogRequest`, `WeekReport`, `AreaTotal`, `Review`, `AreaScore` |
-| `db` | `AreaRepository`, `LogRepository`, `ReviewRepository`, all on `JdbcClient` |
-| `commands` | `AreaCommands`, `LogCommands`, `WeekCommands`, `ReviewCommands` |
-| `output` | One JSON writer for stdout, one error writer for stderr and exit codes |
+Boundary-control-entity: one package per business component, each split into
+`boundary` (the commands: one class per command, implementing `cli.boundary.Command` and returning
+the result to print), `control` (logic and SQL, only when there is some: a one-query command uses
+`JdbcClient` directly) and `entity` (records). A subpackage exists only once it has a class.
+
+| Component | `boundary` | `control` | `entity` |
+| --- | --- | --- | --- |
+| `cli` | `Command`, `CommandLine` (dispatch, JSON on stdout, errors on stderr, exit codes), `Input` (reads JSON from stdin) | | |
+| `ping` | `Ping` | | |
+| `areas` | `AreasShow`, `AreasSave`, `AreasRemove` | `AreaRepository` (`JdbcClient`) | `Area` (checks its own rules), `Unit` |
+| `log` | `Log`, `Day`, `EntryDelete`, `NoteDelete` | log validation | `Note`, `Entry`, `LogRequest` |
+| `review` | `Week`, `ReviewSave`, `ReviewLatest`, `Reviews` | weekly totals (SQL), review validation | `WeekReport`, `AreaTotal`, `Review`, `AreaScore` |
+
+- JSON is snake_case (`weekly_target`), like the database, and unknown fields are rejected.
+- Invalid input (`IllegalArgumentException`, or a JSON error) exits 2 with
+  `{"error":"invalid_input","details":"…"}`; any other failure exits 1 with `command_failed`.
+- SQL names the schema (`lockin.areas`), so it works for any login, not only through
+  `lockin_writer`'s `search_path`.
 
 ### Native-image rules
 
@@ -384,7 +395,7 @@ runs).
   1. `lockin areas show` to get the valid areas and their units.
   2. Work out the day in my timezone. Before 04:00, assume the previous day and say so.
   3. Split the message into entries, each mapped to an area slug.
-  4. `lockin log --file -` with the JSON.
+  4. `lockin log` with the JSON on stdin.
   5. Show a short table of what was saved.
 - **Rules:**
   - Quantities only when I stated them. "A few articles" gets no minutes.
@@ -393,6 +404,12 @@ runs).
   - Save my sentence word for word as the note.
   - No grading and no pep talk in the daily log.
 - **Corrections:** `lockin day`, then `lockin entry delete` / `lockin note delete`, then log again.
+- **Goals:** "add a goal…", "change my reading target to…", "I'm stopping Spanish":
+  1. `lockin areas show`.
+  2. Propose the new or changed areas (slug, name, unit, weekly target, weight, rubric) and ask me
+     to confirm: they decide how my weeks are graded.
+  3. `lockin areas save` with an array of the confirmed areas (one or several), or
+     `lockin areas remove <slug>...`.
 
 ### `lockin-weekly-review` (unattended)
 
@@ -402,7 +419,7 @@ runs).
   2. Score each area 0–10 from actual vs target, using that area's rubric.
   3. Overall score = weighted average of the area scores (weights from the areas).
   4. Write the summary (see below).
-  5. `lockin review save --file -`. On a validation error, fix it and retry once.
+  5. `lockin review save` with the JSON on stdin. On a validation error, fix it and retry once.
 - **What the summary says**, in this order, in one text:
   - The week's dates and the score with its letter grade ("Week of 16 to 22 November: 7.8, a B.").
   - Where the time actually went.
@@ -553,8 +570,8 @@ weekly summary, nothing more, and the key can be rotated in a minute.
 
 ## Step 9: first week
 
-- [ ] Write `areas.json` (start from `areas.example.json`) with areas, units, targets, weights and
-      rubrics; `lockin areas apply --file areas.json`.
+- [ ] Set up my real goals through the Remote Control session (or by hand:
+      `lockin areas save < areas.json`, starting from `areas.example.json`).
 - [ ] Log a few real days.
 - [ ] Run the weekly review by hand in the Remote Control session; tune the rubrics and the
       summary until they read right.
@@ -577,11 +594,6 @@ weekly summary, nothing more, and the key can be rotated in a minute.
 
 ## Sources
 
-- [Spring Shell 4.0.0 GA released](https://spring.io/blog/2025/12/30/spring-shell-4-0-0-ga-released/)
-- [Spring Shell v4 migration guide](https://github.com/spring-projects/spring-shell/wiki/v4-migration-guide)
-- [Spring Shell 4.0.3 and 3.4.3 are out](https://spring.io/blog/2026/06/11/spring-shell-4-0-3-and-3-4-3-are-out/)
-- [Spring Shell execution (non-interactive mode)](https://docs.spring.io/spring-shell/reference/4.0-SNAPSHOT/execution.html)
-- [Spring Shell building (native)](https://docs.spring.io/spring-shell/reference/building.html)
 - [Spring Boot 4.0 system requirements](https://docs.spring.io/spring-boot/4.0/system-requirements.html)
 - [Spring Boot 4.1 system requirements](https://docs.spring.io/spring-boot/4.1/system-requirements.html)
 - [Spring Boot 4.2 native image: first application](https://docs.spring.io/spring-boot/4.2/how-to/native-image/developing-your-first-application.html)
