@@ -79,8 +79,15 @@ tz="${tz:-Europe/Bucharest}"
 mkdir -p "$units_dir"
 sed "s|@prefix@|$prefix|g" "$repo/ops/systemd/lockin-review.service" > "$units_dir/lockin-review.service"
 sed "s|@tz@|$tz|g" "$repo/ops/systemd/lockin-review.timer" > "$units_dir/lockin-review.timer"
-if ! systemctl --user daemon-reload 2>/dev/null; then
-  echo "Installed the review timer, but couldn't reach the systemd user manager:" >&2
-  echo "run systemctl --user daemon-reload as $(id -un) once." >&2
+# A deploy runs outside a login session, so systemctl isn't told where the user manager is. With
+# lingering on, it runs all the time and listens in /run/user/<uid>.
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [[ -S "$runtime_dir/systemd/private" ]]; then
+  if ! XDG_RUNTIME_DIR="$runtime_dir" systemctl --user daemon-reload; then
+    echo "Installed the review timer, but systemctl --user daemon-reload failed." >&2
+  fi
+else
+  echo "Installed the review timer, but the systemd user manager of $(id -un) isn't running." >&2
+  echo "Run sudo loginctl enable-linger $(id -un) once; it then loads the units itself." >&2
 fi
 echo "Installed lockin $commit in $prefix."
